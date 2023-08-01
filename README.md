@@ -1,6 +1,6 @@
 # HaloFit.jl
 
-This repository provides a set of utitilies aimed at fitting dark matter halo properties in a periodic box.
+This repository offers a suite of utilities designed for analyzing dark matter halo properties within a periodic box. Typically, the functions expect input data in the form of arrays detailing particle positions, velocities, and masses. However, if particles have a uniform mass, instead of an array, you can provide a single mass value.
 
 ## Functions
 - `periodic_distance`
