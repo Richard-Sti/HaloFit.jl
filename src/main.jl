@@ -1,17 +1,17 @@
 """
-    periodic_distance(points::Array{T, 2}, reference::Vector{T}, boxsize::T) where T <: Real
+    periodic_distance(points::Matrix{T}, reference::Vector{T}, boxsize::T) where T <: Real
 
 Calculate the distance between a set of points and a reference point within a periodic box.
 
 # Parameters
-- `points`: A `Nx3` array of particle positions.
+- `points`: A `Nx3` matrix of particle positions.
 - `reference`: Reference point position.
 - `boxsize`: Size of the box.
 
 # Returns
 - A 1D vector of length `N` containing the periodic distances between each point in `points` and the `reference` point.
 """
-function periodic_distance(points::Array{T, 2}, reference::Vector{T}, boxsize::T) where T <: Real
+function periodic_distance(points::Matrix{T}, reference::Vector{T}, boxsize::T) where T <: Real
     npoints = size(points, 1)
     dist = zeros(T, npoints)
 
@@ -21,7 +21,7 @@ function periodic_distance(points::Array{T, 2}, reference::Vector{T}, boxsize::T
 end
 
 
-function periodic_distance!(dist::Vector{T}, points::Array{T, 2}, reference::Vector{T}, boxsize::T) where T <: Real
+function periodic_distance!(dist::Vector{T}, points::Matrix{T}, reference::Vector{T}, boxsize::T) where T <: Real
     halfbox = boxsize / 2.0
 
     for i in 1:size(points, 1)
@@ -40,13 +40,13 @@ end
 
 
 """
-    function center_of_mass(points::Array{T, 2}, mass::Union{Vector{T}, Real}, boxsize::T;
+    function center_of_mass(points::Matrix{T}, mass::Union{Vector{T}, T}, boxsize::T;
                             mask::Union{Nothing, Vector{Bool}}=nothing) where T <: Real
 
 Calculate the center of mass of particles within a periodic box.
 
 # Parameters
-- `points`: A `Nx3` array of particle positions.
+- `points`: A `Nx3` matrix of particle positions.
 - `mass`: Either a single mass value or a vector of masses corresponding to each distance in `dist`.
 - `boxsize`: Size of the box.
 
@@ -54,9 +54,9 @@ Calculate the center of mass of particles within a periodic box.
 - `mask`: A `N` long vetor indicating which particles to include in the calculation.
 
 # Returns
-- A 1D array of size `3` indicating the center of mass coordinates `(x, y, z)` within the box.
+- A 1D vector of size `3` indicating the center of mass coordinates `(x, y, z)` within the box.
 """
-function center_of_mass(points::Array{T, 2}, mass::Union{Vector{T}, Real}, boxsize::T;
+function center_of_mass(points::Matrix{T}, mass::Union{Vector{T}, T}, boxsize::T;
                         mask::Union{Nothing, Vector{Bool}}=nothing) where T <: Real
     cm = zeros(T, 3)
 
@@ -79,14 +79,30 @@ function center_of_mass(points::Array{T, 2}, mass::Union{Vector{T}, Real}, boxsi
 end
 
 
+function mean_plus_nsigma(dist::Vector{<:Real}; nsigma::Real=2)
+    npoints = length(dist)
+
+    μ = sum(dist) / npoints
+    σ = 0.
+
+    for d in dist
+        σ += (d - μ)^2
+    end
+
+    σ = (σ / npoints)^0.5
+
+    return μ + nsigma * σ
+end
+
+
 """
-    function shrinking_sphere_cm(points::Array{T, 2}, mass::Union{Vector{T}, Real}, boxsize::T;
-                                 npart_min::Int=30, shrink_factor::Real=0.98) where T <: Real
+    function shrinking_sphere_cm(points::Matrix{T}, mass::Union{Vector{T}, T}, boxsize::T;
+                                 npart_min::Int=50, shrink_factor::Real=0.95) where T <: Real
 
 Compute the center of mass (CM) using a shrinking sphere approach.
 
 # Arguments
-- `points`: A `Nx3` array of particle positions.
+- `points`: A `Nx3` matrix of particle positions.
 - `mass`: Either a single mass value or a vector of masses corresponding to each distance in `dist`.
 - `boxsize`: Size of the box.
 
@@ -98,10 +114,11 @@ Compute the center of mass (CM) using a shrinking sphere approach.
 # Returns
 - A tuple containing the computed center of mass and the distances of points from the center of mass.
 """
-function shrinking_sphere_cm(points::Array{T, 2}, mass::Union{Vector{T}, Real}, boxsize::T;
-                             npart_min::Int=30, shrink_factor::Real=0.98) where T <: Real
+function shrinking_sphere_cm(points::Matrix{T}, mass::Union{Vector{T}, T}, boxsize::T;
+                             npart_min::Int=50, shrink_factor::Real=0.95) where T <: Real
 
     npoints = size(points, 1)
+    shrink_factor = T(shrink_factor)
 
     cm = center_of_mass(points, mass, boxsize)
     dist = zeros(T, npoints)
@@ -109,11 +126,14 @@ function shrinking_sphere_cm(points::Array{T, 2}, mass::Union{Vector{T}, Real}, 
 
     rad = nothing
 
+    i = 0
     while true
         dist = periodic_distance!(dist, points, cm, boxsize)
 
         if rad === nothing
-            rad = maximum(dist)
+            # rad = maximum(dist)
+            rad = mean_plus_nsigma(dist; nsigma=1.5)
+            # @show rad
         end
 
         for i in 1:npoints
@@ -123,17 +143,20 @@ function shrinking_sphere_cm(points::Array{T, 2}, mass::Union{Vector{T}, Real}, 
         cm = center_of_mass(points, mass, boxsize; mask=within_rad)
 
         if sum(within_rad) < npart_min
+            # @show i
+            # @show rad
             return cm, periodic_distance!(dist, points, cm, boxsize)
         end
 
         rad *= shrink_factor
+        i += 1
 
     end
 end
 
 
 """
-    spherical_overdensity_mass!(dist::Vector{T}, mass::Union{Vector{T}, Real}, ρ_target::Real) where T <: Real
+    spherical_overdensity_mass!(dist::Vector{T}, mass::Union{Vector{T}, T}, ρ_target::Real) where T <: Real
 
 Calculate the spherical overdensity mass and radius around a CM, defined as the inner-most
 radius where the density falls below a given threshold. The exact radius is found via linear
@@ -153,12 +176,12 @@ The function modifies the input `dist` in-place when `mass` is of type `Real`. M
 `dist`, `mass` and `ρ_target` are consistent. The code does not perform any unit conversions and does not
 assume the particles to be sorted.
 """
-function spherical_overdensity_mass(dist::Vector{T}, mass::Union{Vector{T}, Real}, ρ_target::Real) where T <: Real
+function spherical_overdensity_mass(dist::Vector{T}, mass::Union{Vector{T}, T}, ρ_target::Real) where T <: Real
     copy(dist)
 
     if typeof(mass) <: Real
         sort!(dist)
-        ρ = typeof(mass).(1:length(dist)) * mass
+        ρ = (1:length(dist)) * mass
     else
         argsort = sortperm(dist)
         dist = dist[argsort]
@@ -177,8 +200,8 @@ function spherical_overdensity_mass(dist::Vector{T}, mass::Union{Vector{T}, Real
 
     i = j - 1
 
-    rad = (dist[j] - dist[i]) * (1. - ρ[i]) / (ρ[j] - ρ[i]) + dist[i]
-    mass_in_rad = (4 / 3 *  π * ρ_target) .* rad.^3
+    rad = (dist[j] - dist[i]) * (1 - ρ[i]) / (ρ[j] - ρ[i]) + dist[i]
+    mass_in_rad = (4 / 3 *  π * ρ_target .* rad.^3)
 
     if mass_in_rad > totmass
         return NaN, NaN
@@ -200,13 +223,14 @@ end
 
 
 """
-    angular_momentum(pos::Array{T, 2}, vel::Array{T, 2}, mass::Union{Vector{T}, T}, cm::Vector{T}, boxsize::T) where T <: Real
+    angular_momentum(pos::Matrix{T}, vel::Matrix{T}, mass::Union{Vector{T}, Real},
+                     cm::Vector{T}, boxsize::T) where T <: Real
 
 Calculate the angular momentum around a given center of mass using particle properties.
 
 # Arguments
-- `pos`: An `(n_points, 3)` array representing the positions of each particle in space.
-- `vel`: An `(n_points, 3)` array representing the velocities of each particle.
+- `pos`: An `(n_points, 3)` matrix representing the positions of each particle in space.
+- `vel`: An `(n_points, 3)` matrix representing the velocities of each particle.
 - `mass`: A vector of length `n_points` containing the masses of each particle or a single scalar value representing a uniform mass for all particles.
 - `cm`: A vector of length 3 representing the center of mass in terms of x, y, and z coordinates.
 - `boxsize`: The size of the box.
@@ -218,7 +242,8 @@ Calculate the angular momentum around a given center of mass using particle prop
 - The function accounts for the periodicity of the box when computing positions relative to the center of mass.
 - The units of the returned angular momentum are simply the product of the units of the input positions, velocities, and masses.
 """
-function angular_momentum(pos::Array{T, 2}, vel::Array{T, 2}, mass::Union{Vector{T}, T}, cm::Vector{T}, boxsize::T) where T <: Real
+function angular_momentum(pos::Matrix{T}, vel::Matrix{T}, mass::Union{Vector{T}, T},
+                          cm::Vector{T}, boxsize::T) where T <: Real
     pos = copy(pos)
     vel = copy(vel)
 
@@ -226,7 +251,7 @@ function angular_momentum(pos::Array{T, 2}, vel::Array{T, 2}, mass::Union{Vector
     shift_pos_to_center_of_box!(pos, cm, boxsize, true)
     shift_vel_to_cm_frame!(vel, mass)
 
-    angmom = zeros(T, 3)
+    angmom = zeros(3)
     npoints = size(pos, 1)
     for i in 1:npoints
         _mass = typeof(mass) <: Real ? mass : mass[i]
@@ -240,7 +265,7 @@ end
 
 
 """
-    function lambda_bullock(angmom::Vector{T}, mass::T, rad::T) where T <: Real
+    function lambda_bullock(angmom::Vector{Real}, mass::Real, rad::Real)
 
 Calculate the Bullock spin, see Eq. 5 in [1].
 
@@ -260,13 +285,13 @@ Klypin, A. A.; Porciani, C.; Primack, J. R.
 # Notes
 - The input quantities should only be calculated with particles in some radius.
 """
-function lambda_bullock(angmom::Vector{T}, mass::T, rad::T) where T <: Real
+function lambda_bullock(angmom::Vector{<:Real}, mass::Real, rad::Real)
     G = 4.300917270069976e-09  # G in (Msun / h)^-1 (Mpc / h) (km / s)^2
     return sqrt(sum(angmom.^2)) / sqrt(2 * G * mass^3 * rad)
 end
 
 
-function shift_pos_to_center_of_box!(points::Array{T, 2}, cm::Vector{T}, boxsize::T,
+function shift_pos_to_center_of_box!(points::Matrix{T}, cm::Vector{T}, boxsize::T,
                                      set_cm_to_zero::Bool=false) where T <: Real
     halfboxsize = boxsize / 2
 
@@ -284,7 +309,7 @@ function shift_pos_to_center_of_box!(points::Array{T, 2}, cm::Vector{T}, boxsize
 end
 
 
-function shift_vel_to_cm_frame!(vel::Array{T, 2}, mass::Union{Vector{T}, Real}) where T <: Real
+function shift_vel_to_cm_frame!(vel::Matrix{T}, mass::Union{Vector{T}, T}) where T <: Real
     npoints = size(vel, 1)
     totmass = typeof(mass) <: Real ? npoints * mass : sum(mass)
     for i in 1:3
