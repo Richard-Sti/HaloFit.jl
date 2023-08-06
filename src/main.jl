@@ -1,3 +1,17 @@
+# Copyright (C) 2023 Richard Stiskalek
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 using LinearAlgebra, LoopVectorization, Optim
 
 mutable struct Halo{T<:Real}
@@ -59,6 +73,17 @@ function periodic_distance!(halo::Halo{T}) where T <: Real
 end
 
 
+"""
+    periodic_distance!(dist::Vector{T}, points::Matrix{T}, reference::Vector{T}, boxsize::T) where T <: Real
+
+Compute the periodic distance between a set of `points` and a `reference` point within a box of size `boxsize`.
+
+# Argumets
+- `dist`: A pre-allocated vector to store the resulting distances.
+- `points`: A matrix where each row is a point in 3D space.
+- `reference`: A vector representing the reference point in 3D space.
+- `boxsize`: The size of the periodic box.
+"""
 function periodic_distance!(dist::Vector{T}, points::Matrix{T}, reference::Vector{T}, boxsize::T) where T <: Real
     halfbox = T(boxsize / 2.0)
 
@@ -77,6 +102,20 @@ function periodic_distance!(dist::Vector{T}, points::Matrix{T}, reference::Vecto
 end
 
 
+"""
+    center_of_mass!(cm::Vector{T}, sin_inv_points::Matrix{T}, cos_inv_points::Matrix{T},
+                    mass::Vector{T}, boxsize::T; mask::Union{Vector{Bool}, Nothing}=nothing) where T <: Real
+
+Compute the center of mass for a set of points.
+
+# Arguments
+- `cm`: Vector to store center of mass coordinates (3D).
+- `sin_inv_points`, `cos_inv_points`: (N x 3) matrices of sine and cosine of inverse point
+   coordinates (2π * points / boxsize).
+- `mass`: Vector of masses for each point.
+- `boxsize`: Size of the periodic box.
+- `mask` (optional): Boolean mask to consider subset of points.
+"""
 function center_of_mass!(cm::Vector{T}, sin_inv_points::Matrix{T}, cos_inv_points::Matrix{T},
                          mass::Vector{T}, boxsize::T; mask::Union{Vector{Bool}, Nothing}=nothing) where T <: Real
     T2π = T(2 * π)
@@ -113,6 +152,17 @@ function center_of_mass!(cm::Vector{T}, points::Matrix{T}, mass::Vector{T}, boxs
 end
 
 
+"""
+    shrinking_sphere_cm!(halo::Halo{T}; npart_min::Int=50, shrink_factor::Real=0.975) where T <: Real
+
+Calculate the center of mass by iteratively refining the center of mass of a `halo` using the
+shrinking sphere method.
+
+# Arguments
+- `halo`: Halo object containing positions, masses, and other halo properties.
+- `npart_min` (optional): Minimum number of particles in the sphere. Default is 50.
+- `shrink_factor` (optional): Factor by which the sphere's radius is reduced in each iteration. Default is 0.975.
+"""
 function shrinking_sphere_cm!(halo::Halo{T}; npart_min::Int=50, shrink_factor::Real=0.975) where T <: Real
     npoints = length(halo)
     shrink_factor = T(shrink_factor)
@@ -146,7 +196,20 @@ function shrinking_sphere_cm!(halo::Halo{T}; npart_min::Int=50, shrink_factor::R
 end
 
 
-function spherical_overdensity_mass(halo::Halo, ρtarget::T) where T <: Real
+"""
+    spherical_overdensity_mass(halo::Halo, ρtarget::T) where T <: Real
+
+Determine the mass and radius enclosing a target overdensity `ρtarget` for a given `halo`.
+
+# Arguments
+- `halo`: Halo object sorted by distance from its center of mass.
+- `ρtarget`: Target overdensity value.
+
+# Returns
+- `mass_in_rad`: Mass within the computed radius.
+- `rad`: Radius enclosing the target overdensity.
+"""
+function spherical_overdensity_mass(halo::Halo{T}, ρtarget::T) where T <: Real
     @assert halo.is_sorted "Halo must be sorted by distance from its CM"
 
     ρ = cumsum(halo.mass)
@@ -203,6 +266,18 @@ function find_first_above_threshold(x::Vector{<:T}, threshold::T) where T <: Rea
 end
 
 
+"""
+    function angular_momentum(halo::Halo{T}, rad::T) where T <: Real
+
+Calculate the angular momentum within a given radius `rad` for a specified `halo`.
+
+# Arguments
+- `halo`: Halo object sorted by distance from its center of mass.
+- `rad`: Radius within which to compute the angular momentum.
+
+# Returns
+- A 3D vector representing the computed angular momentum.
+"""
 function angular_momentum(halo::Halo{T}, rad::T) where T <: Real
     @assert halo.is_sorted "Halo must be sorted by distance from its CM"
     pos = copy(halo.pos)
@@ -232,6 +307,19 @@ function angular_momentum(halo::Halo{T}, rad::T) where T <: Real
 end
 
 
+"""
+    λbullock(angmom::Vector{<:T}, mass::T, rad::T) where T <: Real
+
+Compute the Bullock spin parameter for a given angular momentum, mass, and radius.
+
+# Arguments
+- `angmom`: 3D vector of angular momentum.
+- `mass`: Total mass.
+- `rad`: Radius.
+
+# Returns
+- The computed Bullock spin parameter.
+"""
 function λbullock(angmom::Vector{<:T}, mass::T, rad::T) where T <: Real
     # [G] = (Msun / h)^-1 (Mpc / h) (km / s)^2
     G = T(4.300917270069976e-09)
@@ -265,7 +353,19 @@ function shift_vel_to_cm_frame!(vel::Matrix{T}, mass::Vector{T}) where T <: Real
 end
 
 
+"""
+    nfw_concentration(halo::Halo{T}, rad::T, npart_min::Int=10) where T <: Real
 
+Calculate the NFW concentration parameter for a given `halo` and maximum radius `rad`.
+
+# Arguments
+- `halo`: Halo object sorted by distance from its center of mass.
+- `rad`: Radius for the concentration calculation.
+- `npart_min` (optional): Minimum number of particles. Default is 10.
+
+# Returns
+- The computed NFW concentration parameter or NaN if the calculation fails.
+"""
 function nfw_concentration(halo::Halo{T}, rad::T, npart_min::Int=10) where T <: Real
     @assert halo.is_sorted "Halo must be sorted by distance from its CM"
 
@@ -294,7 +394,6 @@ function nfw_concentration(halo::Halo{T}, rad::T, npart_min::Int=10) where T <: 
     end
 
     return 10^res
-
 end
 
 
@@ -314,6 +413,18 @@ function negll_nfw_concentration(log_c::T, xs::Vector{T}, ws::Vector{T}, imax::I
 end
 
 
+"""
+    inertia_tensor(halo, rad)
+
+Compute the inertia tensor for a `halo` within a given radius `rad`.
+
+# Arguments
+- `halo`: Halo object sorted by distance from its center of mass.
+- `rad`: Radius within which to compute the inertia tensor.
+
+# Returns
+- A 3x3 matrix representing the inertia tensor.
+"""
 function inertia_tensor(halo::Halo{T}, rad::T) where T <: Real
     @assert halo.is_sorted "Halo must be sorted by distance from its CM"
 
@@ -358,6 +469,17 @@ function sqrt_nan(x::T) where T <: Real
 end
 
 
+"""
+    ellipsoid_axes_ratio(Iij)
+
+Calculate the axes ratios of an ellipsoid defined by its inertia tensor `Iij`.
+
+# Arguments
+- `Iij`: 3x3 inertia tensor matrix.
+
+# Returns
+- The axes ratios `(b/a, c/a)` for a > b > c.
+"""
 function ellipsoid_axes_ratio(Iij::Matrix{T}) where T <: Real
     @assert size(Iij) == (3, 3) "Iij must be a 3x3 matrix"
     c, b, a = sqrt_nan.(eigvals(Iij))
