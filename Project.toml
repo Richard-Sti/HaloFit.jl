@@ -4,4 +4,6 @@ authors = ["rstiskalek <richard.stiskalek@protonmail.com>"]
 version = "0.1.0"
 
 [deps]
+LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
+Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
