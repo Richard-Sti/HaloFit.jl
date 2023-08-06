@@ -1,4 +1,5 @@
 using Optim
+using LinearAlgebra
 using LoopVectorization
 
 mutable struct Halo{T<:Real}
@@ -12,7 +13,8 @@ mutable struct Halo{T<:Real}
 end
 
 Base.length(halo::Halo) = size(halo.pos, 1)
-ρcrit0(h::Real) = 2.77536627e+11 * h^2  # Msun / Mpc^3
+ρcrit0(h::Real) = 2.77536627e+11 * h^2  # [ρcrit0] = Msun / Mpc^3
+Base.show(io::IO, halo::Halo) = print(io, "Halo($(length(halo)) particles)")
 
 
 function Halo(pos::Matrix{U}, vel::Matrix{U}, mass::Vector{U}, boxsize::V) where {U <: Real, V <: Real}
@@ -225,7 +227,8 @@ end
 
 
 function λbullock(angmom::Vector{<:T}, mass::T, rad::T) where T <: Real
-    G = T(4.300917270069976e-09)  # G in (Msun / h)^-1 (Mpc / h) (km / s)^2
+    # [G] = (Msun / h)^-1 (Mpc / h) (km / s)^2
+    G = T(4.300917270069976e-09)
     return @fastmath sqrt(sum(angmom.^2)) / sqrt(2 * G * mass^3 * rad)
 end
 
@@ -302,4 +305,46 @@ function negll_nfw_concentration(log_c::T, xs::Vector{T}, ws::Vector{T}, imax::I
     negll *= -1
 
     return negll
+end
+
+
+function reduced_inertia_tensor(halo::Halo{T}, rad::T) where T <: Real
+    @assert halo.is_sorted "Halo must be sorted by distance from its CM"
+
+    imax = find_first_above_threshold(halo.dist, rad)
+    if imax === nothing
+        return NaN
+    end
+
+    imax -= 1
+
+    M = sum(halo.mass[i] for i in 1:imax)
+
+    pos = copy(halo.pos)
+    shift_pos_to_center_of_box!(pos, halo.cm, halo.boxsize)
+
+    Iij = zeros(T, 3, 3)
+    @inbounds @fastmath for i in 1:3
+        @inbounds @fastmath for j in 1:3
+            if i > j
+                Iij[i, j] = Iij[j, i]
+                continue
+            end
+
+            @inbounds @fastmath for n in 1:imax
+                Iij[i, j] += halo.mass[n] * pos[n, i] * pos[n, j] / halo.dist[n]^2
+            end
+
+            Iij[i, j] /= M
+        end
+    end
+
+    return  Iij
+end
+
+
+function ellipsoid_axes_ratio(Iij::Matrix{T}) where T <: Real
+    @assert size(Iij) == (3, 3) "Iij must be a 3x3 matrix"
+    c, b, a = eigvals(Iij).^T(0.5)
+    return b / a, c / a
 end
