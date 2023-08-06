@@ -38,7 +38,7 @@ function fit_from_offsets(fpath, boxsize; verbose::Bool=true, load_in_memory::Bo
     offsets = make_offsets(f["halomap"])
 
     ρ200c = Float32(ρcrit0(1) * 200)
-    symbols = [:cmx, :cmy, :cmz, :mtot, :m200c, :r200c, :lambda200c]
+    symbols = [:cmx, :cmy, :cmz, :mtot, :m200c, :r200c, :lambda200c, :conc, :q, :s]
     n_cols = length(symbols)
     n_rows = length(offsets)
 
@@ -54,6 +54,11 @@ function fit_from_offsets(fpath, boxsize; verbose::Bool=true, load_in_memory::Bo
     for i in 1:n_rows
         halo = load_halo_from_offsets(i, particles, offsets, boxsize)
 
+        if length(halo) < 100
+            next!(p)
+            continue
+        end
+
         df[i, :mtot] = sum(halo.mass)
 
         shrinking_sphere_cm!(halo)
@@ -68,6 +73,13 @@ function fit_from_offsets(fpath, boxsize; verbose::Bool=true, load_in_memory::Bo
         if !isnan(m200c)
             angmom = angular_momentum(halo, r200c)
             df[i, :lambda200c] = λbullock(angmom, m200c, r200c)
+
+            df[i, :conc] = nfw_concentration(halo, r200c)
+
+            Iij = inertia_tensor(halo, r200c)
+            q, s = ellipsoid_axes_ratio(Iij)
+            df[i, :q] = q
+            df[i, :s] = s
         end
 
         next!(p)
@@ -101,3 +113,6 @@ function fit_csiborg()
         res = fit_from_offsets(fpath, 677.7; verbose=true, load_in_memory=false);
     end
 end
+
+
+# fit_csiborg()
