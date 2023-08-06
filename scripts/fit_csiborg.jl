@@ -1,28 +1,15 @@
-using ProgressMeter
-
 using Pkg
 Pkg.activate("/mnt/zfsusers/rstiskalek/HaloFit")
 
-using HaloFit
-using NPZ
-using HDF5
-using DataFrames
+using DataFrames, HaloFit, HDF5, ProgressMeter
 
-
-function zfill(n::String, width::Int)
-    return lpad(n, width, '0')
+begin
+    zfill(n::Int, width::Int) = zfill(string(n), width)
+    zfill(n::String, width::Int) = lpad(n, width, '0')
+    path_csiborg_particles(nsim::Integer) = "/mnt/extraspace/rstiskalek/CSiBORG/particles/parts_$(zfill(nsim, 5)).h5"
+    path_csiborg_output(nsim::Integer) = "/mnt/zfsusers/rstiskalek/HaloFit/scripts/fit_$(zfill(nsim, 5)).h5"
 end
 
-
-function zfill(n::Int, width::Int)
-    return zfill(string(n), width)
-end
-
-
-
-################################################################################
-#                        I/O of the particles                                  #
-################################################################################
 
 function make_offsets(halomap)
     if isa(halomap, HDF5.Dataset)
@@ -39,8 +26,55 @@ function load_halo_from_offsets(hid, particles, offsets, boxsize)
     vel = Matrix(particles[4:6, i:j]')
     mass = particles[7, i:j]
 
-    pos .*= eltype(pos).(boxsize)
-    return pos, vel, mass
+    pos .*= @fastmath eltype(pos).(boxsize)
+
+    return Halo(pos, vel, mass, boxsize)
+end
+
+
+function fit_from_offsets(fpath, boxsize; verbose::Bool=true, load_in_memory::Bool=false)
+    f = h5open(fpath, "r")
+    particles = f["particles"]
+    offsets = make_offsets(f["halomap"])
+
+    ρ200c = Float32(ρcrit0(1) * 200)
+    symbols = [:cmx, :cmy, :cmz, :mtot, :m200c, :r200c, :lambda200c]
+    n_cols = length(symbols)
+    n_rows = length(offsets)
+
+    if load_in_memory
+        println("Loading particles into memory ...")
+        t0 = time()
+        particles = particles[:, :]
+        println("Loaded particles in in $(time() - t0) seconds.")
+    end
+
+    df = DataFrame([fill(Float32(NaN), n_rows) for _ in 1:n_cols], symbols)
+    p = Progress(n_rows; enabled=verbose, dt=0.1, barlen=50, showspeed=true)
+    for i in 1:n_rows
+        halo = load_halo_from_offsets(i, particles, offsets, boxsize)
+
+        df[i, :mtot] = sum(halo.mass)
+
+        shrinking_sphere_cm!(halo)
+        df[i, :cmx] = halo.cm[1]
+        df[i, :cmy] = halo.cm[2]
+        df[i, :cmz] = halo.cm[3]
+
+        m200c, r200c = spherical_overdensity_mass(halo, ρ200c)
+        df[i, :m200c] = m200c
+        df[i, :r200c] = r200c
+
+        if !isnan(m200c)
+            angmom = angular_momentum(halo, r200c)
+            df[i, :lambda200c] = λbullock(angmom, m200c, r200c)
+        end
+
+        next!(p)
+    end
+    finish!(p)
+
+    return df
 end
 
 
@@ -55,72 +89,15 @@ end
 
 
 ################################################################################
-#                             CSiBORG Fitting                                  #
+################################################################################
 ################################################################################
 
 
-function fit_single_csiborg(fpath::String, load_in_memory::Bool=false)
-    boxsize = Float32(677.7)
-    f = h5open(fpath, "r")
-    offsets = make_offsets(f["halomap"])
-
-
-    ρ200c = crit_density0(1.) * 200
-
-    symbols = [:cmx, :cmy, :cmz, :mtot, :m200c, :r200c, :lambda200c]
-    n_cols = length(symbols)
-    # n_rows = length(offsets)
-    n_rows = 5000
-
-    df = DataFrame([fill(NaN, n_rows) for _ in 1:n_cols], symbols)
-
-    p = Progress(n_rows; showspeed=true)
-
-    particles = f["particles"]
-
-    if load_in_memory
-        particles = particles[:, :]
+function fit_csiborg()
+    nsims = [7444, 7444 + 24, 7444 + 24 * 2]
+    for nsim in nsims
+        println("Fitting CSiBORG IC `$(nsim)`")
+        fpath = path_csiborg_particles(nsim)
+        res = fit_from_offsets(fpath, 677.7; verbose=true, load_in_memory=false);
     end
-
-    for i in 1:n_rows
-        pos, vel, mass = load_halo_from_offsets(i, particles, offsets, boxsize)
-        cm, dist = shrinking_sphere_cm(pos, mass, boxsize)
-
-        m200c, r200c = spherical_overdensity_mass(dist, mass, ρ200c)
-
-        mask = dist .< r200c
-        angmom = angular_momentum(pos[mask, :], vel[mask, :], mass[mask], cm, boxsize)
-        λ200c = lambda_bullock(angmom, m200c, r200c)
-
-        df[i, :cmx] = cm[1]
-        df[i, :cmy] = cm[2]
-        df[i, :cmz] = cm[3]
-        df[i, :mtot] = sum(mass)
-        df[i, :m200c] = m200c
-        df[i, :r200c] = r200c
-        df[i, :lambda200c] = λ200c
-
-        next!(p)
-    end
-
-    return df
-
-end
-
-
-################################################################################
-#                             Submission                                       #
-################################################################################
-
-
-particles_path(nsim::Integer) = "/mnt/extraspace/rstiskalek/CSiBORG/particles/parts_$(zfill(nsim, 5)).h5"
-output_path(nsim::Integer) = "/mnt/zfsusers/rstiskalek/HaloFit//scripts/fit_$(zfill(nsim, 5)).h5"
-
-
-nsims = [7444]
-
-for nsim in nsims
-    println("Calculating for `$(nsim)`")
-    df = fit_single_csiborg(particles_path(nsim))
-    save_frame(output_path(nsim), df)
 end
