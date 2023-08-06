@@ -1,16 +1,63 @@
 # HaloFit.jl
 
-This repository offers a suite of utilities designed for analyzing dark matter halo properties within a periodic box. Typically, the functions expect input data in the form of arrays detailing particle positions, velocities, and masses. However, if particles have a uniform mass, instead of an array, you can provide a single mass value.
+**HaloFit.jl** is a highly-optimized Julia package offering a suite of utilities designed for analyzing dark matter halo properties within a periodic box.
 
 ## Functions
-- `periodic_distance`
-- `center_of_mass`
-- `shrinking_sphere_cm`
-- `angular_momentum`
+- `shrink_sphere_cm!`
 - `spherical_overdensity_mass`
-- `lambda_bullock`
+- `angular_momentum`
+- `λbullock`
+- `nfw_concentration`
+- `inertia_tensor`
+- `ellipsoid_axes_ratio`
+- `ρcrit0`
 
+## Installation
 
+To install `HaloFit.jl`, you can clone the repository directly:
+
+```bash
+git clone https://github.com/Richard-Sti/HaloFit.jl
+cd HaloFit.jl
+```
+
+Start Julia and activate the project:
+
+```julia
+using Pkg
+Pkg.activate(".")
+Pkg.instantiate(".")
+Pkg.precompile(".")
+```
+
+## Dependencies
+
+This project relies on the following Julia packages:
+
+- [LoopVectorization.jl](https://github.com/JuliaSIMD/LoopVectorization.jl)
+- [Optim.jl](https://github.com/JuliaNLSolvers/Optim.jl)
+
+## Basic Usage
+
+Here's a quick start guide on using `HaloFit.jl`:
+
+```julia
+using HaloFit
+
+# Matrices of halo's particle positions, velocities, and masses
+pos = ...
+vel = ...
+mass = ...
+
+boxsize = ...
+
+h = Halo()
+
+shrinking_sphere_cm!(h)
+@show h.cm
+```
+
+For a working example, see ...
 
 ## License
 
