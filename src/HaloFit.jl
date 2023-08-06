@@ -12,7 +12,7 @@ export Halo,
        angular_momentum,
        λbullock,
        nfw_concentration,
-       reduced_inertia_tensor,
+       inertia_tensor,
        ellipsoid_axes_ratio,
        ρcrit0
 

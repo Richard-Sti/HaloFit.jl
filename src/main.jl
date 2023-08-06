@@ -1,6 +1,4 @@
-using Optim
-using LinearAlgebra
-using LoopVectorization
+using LinearAlgebra, LoopVectorization, Optim
 
 mutable struct Halo{T<:Real}
     pos::Matrix{T}
@@ -115,7 +113,7 @@ function center_of_mass!(cm::Vector{T}, points::Matrix{T}, mass::Vector{T}, boxs
 end
 
 
-function shrinking_sphere_cm!(halo::Halo{T}; npart_min::Int=50, shrink_factor::Real=0.95) where T <: Real
+function shrinking_sphere_cm!(halo::Halo{T}; npart_min::Int=50, shrink_factor::Real=0.975) where T <: Real
     npoints = length(halo)
     shrink_factor = T(shrink_factor)
 
@@ -156,13 +154,21 @@ function spherical_overdensity_mass(halo::Halo, ρtarget::T) where T <: Real
     ρ ./= (T(4 / 3 * π) .* halo.dist.^3)
     ρ ./= ρtarget
 
-    j = find_first_below_threshold(ρ, T(1))
+    if ρ[2] > 1
+        j = find_first_below_threshold(ρ, T(1))
+    else
+        j = find_first_above_threshold(ρ, T(1))
+    end
 
     if j === nothing
-        return NaN, NaN
+        return T(NaN), T(NaN)
     end
 
     i = j - 1
+
+    if @inbounds !((ρ[i] > 1 && ρ[j] < 1) || (ρ[i] < 1 && ρ[j] > 1))
+        return T(NaN), T(NaN)
+    end
 
     rad = @inbounds (halo.dist[j] - halo.dist[i]) * (1 - ρ[i]) / (ρ[j] - ρ[i]) + halo.dist[i]
     mass_in_rad = T(4 / 3 *  π) * ρtarget .* rad.^3
@@ -308,7 +314,7 @@ function negll_nfw_concentration(log_c::T, xs::Vector{T}, ws::Vector{T}, imax::I
 end
 
 
-function reduced_inertia_tensor(halo::Halo{T}, rad::T) where T <: Real
+function inertia_tensor(halo::Halo{T}, rad::T) where T <: Real
     @assert halo.is_sorted "Halo must be sorted by distance from its CM"
 
     imax = find_first_above_threshold(halo.dist, rad)
@@ -332,7 +338,7 @@ function reduced_inertia_tensor(halo::Halo{T}, rad::T) where T <: Real
             end
 
             @inbounds @fastmath for n in 1:imax
-                Iij[i, j] += halo.mass[n] * pos[n, i] * pos[n, j] / halo.dist[n]^2
+                Iij[i, j] += halo.mass[n] * pos[n, i] * pos[n, j]
             end
 
             Iij[i, j] /= M
@@ -343,8 +349,17 @@ function reduced_inertia_tensor(halo::Halo{T}, rad::T) where T <: Real
 end
 
 
+function sqrt_nan(x::T) where T <: Real
+    if x < 0
+        return T(NaN)
+    end
+
+    return sqrt(x)
+end
+
+
 function ellipsoid_axes_ratio(Iij::Matrix{T}) where T <: Real
     @assert size(Iij) == (3, 3) "Iij must be a 3x3 matrix"
-    c, b, a = eigvals(Iij).^T(0.5)
+    c, b, a = sqrt_nan.(eigvals(Iij))
     return b / a, c / a
 end
