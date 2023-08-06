@@ -24,6 +24,7 @@ mutable struct Halo{T<:Real}
     is_sorted::Bool
 end
 
+
 Base.length(halo::Halo) = size(halo.pos, 1)
 ρcrit0(h::Real) = 2.77536627e+11 * h^2  # [ρcrit0] = Msun / Mpc^3
 Base.show(io::IO, halo::Halo) = print(io, "Halo($(length(halo)) particles)")
