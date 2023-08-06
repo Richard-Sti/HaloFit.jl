@@ -1,3 +1,5 @@
+using Optim
+using LoopVectorization
 
 mutable struct Halo{T<:Real}
     pos::Matrix{T}
@@ -10,6 +12,7 @@ mutable struct Halo{T<:Real}
 end
 
 Base.length(halo::Halo) = size(halo.pos, 1)
+ρcrit0(h::Real) = 2.77536627e+11 * h^2  # Msun / Mpc^3
 
 
 function Halo(pos::Matrix{U}, vel::Matrix{U}, mass::Vector{U}, boxsize::V) where {U <: Real, V <: Real}
@@ -98,6 +101,7 @@ function center_of_mass!(cm::Vector{T}, sin_inv_points::Matrix{T}, cos_inv_point
     return cm
 end
 
+
 function center_of_mass!(cm::Vector{T}, points::Matrix{T}, mass::Vector{T}, boxsize::T) where T <: Real
     center_of_mass!(
         cm,
@@ -143,7 +147,6 @@ end
 
 
 function spherical_overdensity_mass(halo::Halo, ρtarget::T) where T <: Real
-
     @assert halo.is_sorted "Halo must be sorted by distance from its CM"
 
     ρ = cumsum(halo.mass)
@@ -208,7 +211,9 @@ function angular_momentum(halo::Halo{T}, rad::T) where T <: Real
         return angmom
     end
 
-    @inbounds @fastmath for i in 1:(imax - 1)
+    imax -= 1
+
+    @inbounds @fastmath for i in 1:(imax)
         m = halo.mass[i]
         angmom[1] += m * (pos[i, 2] * vel[i, 3] - pos[i, 3] * vel[i, 2])
         angmom[2] += m * (pos[i, 3] * vel[i, 1] - pos[i, 1] * vel[i, 3])
@@ -251,6 +256,50 @@ function shift_vel_to_cm_frame!(vel::Matrix{T}, mass::Vector{T}) where T <: Real
 end
 
 
-function ρcrit0(h::T) where T <: Real
-    return 2.77536627e+11 * h^2
+
+function nfw_concentration(halo::Halo{T}, rad::T, npart_min::Int=10) where T <: Real
+    @assert halo.is_sorted "Halo must be sorted by distance from its CM"
+
+    imax = find_first_above_threshold(halo.dist, rad)
+    if imax === nothing || imax < npart_min
+        return T(NaN)
+    end
+
+    imax -= 1
+
+    log_conc_min = T(-3)
+    log_conc_max = T(3)
+
+    res = optimize(
+        x -> negll_nfw_concentration(x, halo.dist / rad, halo.mass / halo.mass[1], imax),
+        T(-3), T(3))
+
+    if !Optim.converged(res)
+        return T(NaN)
+    end
+
+    res = Optim.minimizer(res)
+
+    if isapprox(res, log_conc_min) || isapprox(res, log_conc_max)
+        return T(NaN)
+    end
+
+    return 10^res
+
+end
+
+
+function negll_nfw_concentration(log_c::T, xs::Vector{T}, ws::Vector{T}, imax::Int) where T <: Real
+    c = 10^log_c
+
+    negll = T(0)
+
+    @turbo for i in 1:imax
+        negll += log(ws[i] * xs[i] / (1 + c * xs[i])^2)
+    end
+
+    negll += @fastmath imax * log(c^2 / (log(1 + c)  - c / (1 + c)))
+    negll *= -1
+
+    return negll
 end

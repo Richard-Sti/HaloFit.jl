@@ -11,6 +11,7 @@ export Halo,
        spherical_overdensity_mass,
        angular_momentum,
        λbullock,
+       nfw_concentration,
        ρcrit0
 
 end # module HaloFit
