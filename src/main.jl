@@ -1,32 +1,67 @@
-"""
-    periodic_distance(points::Matrix{T}, reference::Vector{T}, boxsize::T) where T <: Real
 
-Calculate the distance between a set of points and a reference point within a periodic box.
+mutable struct Halo{T<:Real}
+    pos::Matrix{T}
+    vel::Matrix{T}
+    mass::Vector{T}
+    boxsize::T
+    cm::Vector{T}
+    dist::Vector{T}
+    is_sorted::Bool
+end
 
-# Parameters
-- `points`: A `Nx3` matrix of particle positions.
-- `reference`: Reference point position.
-- `boxsize`: Size of the box.
+Base.length(halo::Halo) = size(halo.pos, 1)
 
-# Returns
-- A 1D vector of length `N` containing the periodic distances between each point in `points` and the `reference` point.
-"""
-function periodic_distance(points::Matrix{T}, reference::Vector{T}, boxsize::T) where T <: Real
-    npoints = size(points, 1)
-    dist = zeros(T, npoints)
 
-    periodic_distance!(dist, points, reference, boxsize)
+function Halo(pos::Matrix{U}, vel::Matrix{U}, mass::Vector{U}, boxsize::V) where {U <: Real, V <: Real}
+    return Halo(pos,
+                vel,
+                mass,
+                convert(U, boxsize),
+                Vector{U}(undef, 3),
+                Vector{U}(undef, size(pos, 1)),
+                false
+                )
+end
 
-    return dist
+
+function meansigma(x::Vector{T}) where T <: Real
+    npoints = length(x)
+
+    μ = sum(x) / npoints
+    σ = T(0.)
+
+    @inbounds @fastmath for i in 1:npoints
+        σ += (x[i] - μ)^2
+    end
+
+    σ = sqrt(σ / npoints)
+    return μ, σ
+end
+
+
+function periodic_distance!(halo::Halo{T}) where T <: Real
+    periodic_distance!(halo.dist, halo.pos, halo.cm, halo.boxsize)
+
+    sorted_indices = sortperm(halo.dist)
+
+    halo.pos .= halo.pos[sorted_indices, :]
+    halo.vel .= halo.vel[sorted_indices, :]
+
+    permute!(halo.mass, sorted_indices)
+    permute!(halo.dist, sorted_indices)
+
+    halo.is_sorted = true
+
+    return halo
 end
 
 
 function periodic_distance!(dist::Vector{T}, points::Matrix{T}, reference::Vector{T}, boxsize::T) where T <: Real
-    halfbox = boxsize / 2.0
+    halfbox = T(boxsize / 2.0)
 
-    for i in 1:size(points, 1)
-        dist_sq = 0.0
-        for j in 1:3
+    @inbounds for i in 1:size(points, 1)
+        dist_sq = T(0.0)
+        @simd for j in 1:3
             dist_1d = abs(points[i, j] - reference[j])
             dist_1d = dist_1d > halfbox ? boxsize - dist_1d : dist_1d
             dist_sq += dist_1d^2
@@ -39,37 +74,22 @@ function periodic_distance!(dist::Vector{T}, points::Matrix{T}, reference::Vecto
 end
 
 
-"""
-    function center_of_mass(points::Matrix{T}, mass::Union{Vector{T}, T}, boxsize::T;
-                            mask::Union{Nothing, Vector{Bool}}=nothing) where T <: Real
+function center_of_mass!(cm::Vector{T}, sin_inv_points::Matrix{T}, cos_inv_points::Matrix{T},
+                         mass::Vector{T}, boxsize::T; mask::Union{Vector{Bool}, Nothing}=nothing) where T <: Real
+    T2π = T(2 * π)
 
-Calculate the center of mass of particles within a periodic box.
+    @inbounds @fastmath for i in 1:3
+        cm_i_real = T(0.0)
+        cm_i_imag = T(0.0)
+        @inbounds @fastmath for j in 1:length(mass)
+            (mask === nothing || mask[j]) || continue
 
-# Parameters
-- `points`: A `Nx3` matrix of particle positions.
-- `mass`: Either a single mass value or a vector of masses corresponding to each distance in `dist`.
-- `boxsize`: Size of the box.
-
-# Keyword Arguments
-- `mask`: A `N` long vetor indicating which particles to include in the calculation.
-
-# Returns
-- A 1D vector of size `3` indicating the center of mass coordinates `(x, y, z)` within the box.
-"""
-function center_of_mass(points::Matrix{T}, mass::Union{Vector{T}, T}, boxsize::T;
-                        mask::Union{Nothing, Vector{Bool}}=nothing) where T <: Real
-    cm = zeros(T, 3)
-
-    for i in 1:3
-        cm_i = 0.
-        for j in 1:size(points, 1)
-            _mass = typeof(mass) <: Real ? mass : mass[j]
-            if mask === nothing || mask[j]
-                cm_i += _mass * exp.(2im * π * points[j, i] / boxsize)
-            end
+            m = mass[j]
+            cm_i_real += m * cos_inv_points[j, i]
+            cm_i_imag += m * sin_inv_points[j, i]
         end
 
-        cm_i = atan(imag(cm_i), real(cm_i)) * boxsize / (2 * π)
+        cm_i = atan(cm_i_imag, cm_i_real) * boxsize / T2π
         cm_i = cm_i < 0 ? cm_i + boxsize : cm_i
 
         cm[i] = cm_i
@@ -78,121 +98,60 @@ function center_of_mass(points::Matrix{T}, mass::Union{Vector{T}, T}, boxsize::T
     return cm
 end
 
-
-function mean_plus_nsigma(dist::Vector{<:Real}; nsigma::Real=2)
-    npoints = length(dist)
-
-    μ = sum(dist) / npoints
-    σ = 0.
-
-    for d in dist
-        σ += (d - μ)^2
-    end
-
-    σ = (σ / npoints)^0.5
-
-    return μ + nsigma * σ
+function center_of_mass!(cm::Vector{T}, points::Matrix{T}, mass::Vector{T}, boxsize::T) where T <: Real
+    center_of_mass!(
+        cm,
+        sin.(T(2 * π) .* points ./ boxsize),
+        cos.(T(2 * π) .* points ./ boxsize),
+        mass,
+        boxsize
+        )
 end
 
 
-"""
-    function shrinking_sphere_cm(points::Matrix{T}, mass::Union{Vector{T}, T}, boxsize::T;
-                                 npart_min::Int=50, shrink_factor::Real=0.95) where T <: Real
-
-Compute the center of mass (CM) using a shrinking sphere approach.
-
-# Arguments
-- `points`: A `Nx3` matrix of particle positions.
-- `mass`: Either a single mass value or a vector of masses corresponding to each distance in `dist`.
-- `boxsize`: Size of the box.
-
-# Keyword Arguments
-- `npart_min`: Minimum number of particles. Once the number of particles within the current sphere radius
-  falls below this threshold, the function will return the current CM.
-- `shrink_factor`: Factor by which the sphere's radius is multiplied in each iteration.
-
-# Returns
-- A tuple containing the computed center of mass and the distances of points from the center of mass.
-"""
-function shrinking_sphere_cm(points::Matrix{T}, mass::Union{Vector{T}, T}, boxsize::T;
-                             npart_min::Int=50, shrink_factor::Real=0.95) where T <: Real
-
-    npoints = size(points, 1)
+function shrinking_sphere_cm!(halo::Halo{T}; npart_min::Int=50, shrink_factor::Real=0.95) where T <: Real
+    npoints = length(halo)
     shrink_factor = T(shrink_factor)
 
-    cm = center_of_mass(points, mass, boxsize)
-    dist = zeros(T, npoints)
-    within_rad = fill(true, npoints)
+    sin_inv_points = sin.(T(2 * π) .* halo.pos ./ halo.boxsize)
+    cos_inv_points = cos.(T(2 * π) .* halo.pos ./ halo.boxsize)
+
+    # Initial guess
+    center_of_mass!(halo.cm, sin_inv_points, cos_inv_points, halo.mass, halo.boxsize)
 
     rad = nothing
-
-    i = 0
+    within_rad = fill(true, npoints)
     while true
-        dist = periodic_distance!(dist, points, cm, boxsize)
+         periodic_distance!(halo.dist, halo.pos, halo.cm, halo.boxsize)
 
-        if rad === nothing
-            # rad = maximum(dist)
-            rad = mean_plus_nsigma(dist; nsigma=1.5)
-            # @show rad
+         if rad === nothing
+             μ, σ = meansigma(halo.dist)
+             rad = μ + T(1.5) * σ
+         end
+
+        @inbounds for i in 1:npoints
+            within_rad[i] = halo.dist[i] <= rad
         end
 
-        for i in 1:npoints
-            within_rad[i] = dist[i] <= rad
-        end
+        center_of_mass!(halo.cm, sin_inv_points, cos_inv_points, halo.mass, halo.boxsize;
+                        mask=within_rad)
 
-        cm = center_of_mass(points, mass, boxsize; mask=within_rad)
-
-        if sum(within_rad) < npart_min
-            # @show i
-            # @show rad
-            return cm, periodic_distance!(dist, points, cm, boxsize)
-        end
-
+        sum(within_rad) < npart_min && return periodic_distance!(halo)
         rad *= shrink_factor
-        i += 1
-
     end
 end
 
 
-"""
-    spherical_overdensity_mass!(dist::Vector{T}, mass::Union{Vector{T}, T}, ρ_target::Real) where T <: Real
+function spherical_overdensity_mass(halo::Halo, ρtarget::T) where T <: Real
 
-Calculate the spherical overdensity mass and radius around a CM, defined as the inner-most
-radius where the density falls below a given threshold. The exact radius is found via linear
-interpolation between the two particles enclosing the threshold.
+    @assert halo.is_sorted "Halo must be sorted by distance from its CM"
 
-# Arguments
-- `dist`: Distance of each particle from the centre of mass.
-- `mass`: Either a single mass value or a vector of masses corresponding to each distance in `dist`.
-- `ρ_target`: The target density threshold.
-
-# Returns
-- `mass_in_rad`: Overdensity mass up to the radius where the density falls below `ρ_target` in (Msun / h).
-- `rad`: Overdensity radius in box units where the density falls below `ρ_target`.
-
-# Note
-The function modifies the input `dist` in-place when `mass` is of type `Real`. Make sure that units of
-`dist`, `mass` and `ρ_target` are consistent. The code does not perform any unit conversions and does not
-assume the particles to be sorted.
-"""
-function spherical_overdensity_mass(dist::Vector{T}, mass::Union{Vector{T}, T}, ρ_target::Real) where T <: Real
-    copy(dist)
-
-    if typeof(mass) <: Real
-        sort!(dist)
-        ρ = (1:length(dist)) * mass
-    else
-        argsort = sortperm(dist)
-        dist = dist[argsort]
-        ρ = cumsum(mass[argsort])
-    end
-
+    ρ = cumsum(halo.mass)
     totmass = ρ[end]
-    ρ ./= (4 / 3 * π * dist.^3)
-    ρ ./= ρ_target
+    ρ ./= (T(4 / 3 * π) .* halo.dist.^3)
+    ρ ./= ρtarget
 
-    j = find_first_below_threshold(ρ, 1.)
+    j = find_first_below_threshold(ρ, T(1))
 
     if j === nothing
         return NaN, NaN
@@ -200,19 +159,19 @@ function spherical_overdensity_mass(dist::Vector{T}, mass::Union{Vector{T}, T}, 
 
     i = j - 1
 
-    rad = (dist[j] - dist[i]) * (1 - ρ[i]) / (ρ[j] - ρ[i]) + dist[i]
-    mass_in_rad = (4 / 3 *  π * ρ_target .* rad.^3)
+    rad = @inbounds (halo.dist[j] - halo.dist[i]) * (1 - ρ[i]) / (ρ[j] - ρ[i]) + halo.dist[i]
+    mass_in_rad = T(4 / 3 *  π) * ρtarget .* rad.^3
 
     if mass_in_rad > totmass
-        return NaN, NaN
+        return T(NaN), T(NaN)
     end
 
     return mass_in_rad, rad
 end
 
 
-function find_first_below_threshold(x::Vector{<:Real}, threshold::Real)
-    for i in 2:length(x)
+function find_first_below_threshold(x::Vector{<:T}, threshold::T) where T <: Real
+    @inbounds for i in 2:length(x)
         if x[i] < threshold
             return i
         end
@@ -222,117 +181,76 @@ function find_first_below_threshold(x::Vector{<:Real}, threshold::Real)
 end
 
 
-"""
-    angular_momentum(pos::Matrix{T}, vel::Matrix{T}, mass::Union{Vector{T}, Real},
-                     cm::Vector{T}, boxsize::T) where T <: Real
+function find_first_above_threshold(x::Vector{<:T}, threshold::T) where T <: Real
+    @inbounds for i in 2:length(x)
+        if x[i] > threshold
+            return i
+        end
+    end
 
-Calculate the angular momentum around a given center of mass using particle properties.
-
-# Arguments
-- `pos`: An `(n_points, 3)` matrix representing the positions of each particle in space.
-- `vel`: An `(n_points, 3)` matrix representing the velocities of each particle.
-- `mass`: A vector of length `n_points` containing the masses of each particle or a single scalar value representing a uniform mass for all particles.
-- `cm`: A vector of length 3 representing the center of mass in terms of x, y, and z coordinates.
-- `boxsize`: The size of the box.
-
-# Returns
-- `angmom`: A vector of length 3 representing the angular momentum components (Lx, Ly, Lz) of the system around the specified center of mass.
-
-# Notes
-- The function accounts for the periodicity of the box when computing positions relative to the center of mass.
-- The units of the returned angular momentum are simply the product of the units of the input positions, velocities, and masses.
-"""
-function angular_momentum(pos::Matrix{T}, vel::Matrix{T}, mass::Union{Vector{T}, T},
-                          cm::Vector{T}, boxsize::T) where T <: Real
-    pos = copy(pos)
-    vel = copy(vel)
+    return nothing
+end
 
 
-    shift_pos_to_center_of_box!(pos, cm, boxsize, true)
-    shift_vel_to_cm_frame!(vel, mass)
+function angular_momentum(halo::Halo{T}, rad::T) where T <: Real
+    @assert halo.is_sorted "Halo must be sorted by distance from its CM"
+    pos = copy(halo.pos)
+    vel = copy(halo.vel)
 
-    angmom = zeros(3)
-    npoints = size(pos, 1)
-    for i in 1:npoints
-        _mass = typeof(mass) <: Real ? mass : mass[i]
-        angmom[1] += _mass * (pos[i, 2] * vel[i, 3] - pos[i, 3] * vel[i, 2])
-        angmom[2] += _mass * (pos[i, 3] * vel[i, 1] - pos[i, 1] * vel[i, 3])
-        angmom[3] += _mass * (pos[i, 1] * vel[i, 2] - pos[i, 2] * vel[i, 1])
+    shift_pos_to_center_of_box!(pos, halo.cm, halo.boxsize)
+    shift_vel_to_cm_frame!(vel, halo.mass)
+
+    angmom = zeros(T, 3)
+    imax = find_first_above_threshold(halo.dist, rad)
+
+    if imax === nothing
+        angmom *= NaN
+        return angmom
+    end
+
+    @inbounds @fastmath for i in 1:(imax - 1)
+        m = halo.mass[i]
+        angmom[1] += m * (pos[i, 2] * vel[i, 3] - pos[i, 3] * vel[i, 2])
+        angmom[2] += m * (pos[i, 3] * vel[i, 1] - pos[i, 1] * vel[i, 3])
+        angmom[3] += m * (pos[i, 1] * vel[i, 2] - pos[i, 2] * vel[i, 1])
     end
 
     return angmom
 end
 
 
-"""
-    function lambda_bullock(angmom::Vector{Real}, mass::Real, rad::Real)
-
-Calculate the Bullock spin, see Eq. 5 in [1].
-
-# Parameters
-- `angmom`: Angular momentum in (Msun / h) * (Mpc / h) * (km / s).
-- `mass`: Mass in Msun / h.
-- `rad`: Radius corresponding to `mass` in Mpc / h.
-
-# Returns
-- `lambda_bullock`: float
-
-# References
-[1] A Universal Angular Momentum Profile for Galactic Halos; 2001;
-Bullock, J. S.; Dekel, A.;  Kolatt, T. S.; Kravtsov, A. V.;
-Klypin, A. A.; Porciani, C.; Primack, J. R.
-
-# Notes
-- The input quantities should only be calculated with particles in some radius.
-"""
-function lambda_bullock(angmom::Vector{<:Real}, mass::Real, rad::Real)
-    G = 4.300917270069976e-09  # G in (Msun / h)^-1 (Mpc / h) (km / s)^2
-    return sqrt(sum(angmom.^2)) / sqrt(2 * G * mass^3 * rad)
+function λbullock(angmom::Vector{<:T}, mass::T, rad::T) where T <: Real
+    G = T(4.300917270069976e-09)  # G in (Msun / h)^-1 (Mpc / h) (km / s)^2
+    return @fastmath sqrt(sum(angmom.^2)) / sqrt(2 * G * mass^3 * rad)
 end
 
 
-function shift_pos_to_center_of_box!(points::Matrix{T}, cm::Vector{T}, boxsize::T,
-                                     set_cm_to_zero::Bool=false) where T <: Real
-    halfboxsize = boxsize / 2
-
-    for i in 1:size(points, 1)
-        for j in 1:3
-            points[i, j] += (halfboxsize - cm[j])
-            points[i, j] %= boxsize
-
-            if set_cm_to_zero
-                points[i, j] -= halfboxsize
-            end
-
+function shift_pos_to_center_of_box!(points::Matrix{T}, cm::Vector{T}, boxsize::T) where T <: Real
+    hw = boxsize / 2
+    @inbounds for i in 1:size(points, 1)
+        @inbounds @fastmath for j in 1:3
+            points[i, j] = (points[i, j] + hw - cm[j]) % boxsize - hw
         end
     end
 end
 
 
-function shift_vel_to_cm_frame!(vel::Matrix{T}, mass::Union{Vector{T}, T}) where T <: Real
+function shift_vel_to_cm_frame!(vel::Matrix{T}, mass::Vector{T}) where T <: Real
     npoints = size(vel, 1)
-    totmass = typeof(mass) <: Real ? npoints * mass : sum(mass)
-    for i in 1:3
-        vel_i = 0.
+    totmass = sum(mass)
 
-        for j in 1:npoints
-            m = typeof(mass) <: Real ? mass : mass[j]
-            vel_i += m * vel[j, i]
+    @fastmath @inbounds for i in 1:3
+        vel_i = 0.
+        @fastmath @inbounds for j in 1:npoints
+            vel_i += mass[j] * vel[j, i]
         end
 
         vel_i /= totmass
         vel[:, i] .-= vel_i
-
     end
-    return vel
 end
 
 
-"""
-    crit_density0(h)
-
-Return the z = 0 critical density in units of h^2 Msun / Mpc^3.
-"""
-function crit_density0(h::Real)
+function ρcrit0(h::T) where T <: Real
     return 2.77536627e+11 * h^2
 end
