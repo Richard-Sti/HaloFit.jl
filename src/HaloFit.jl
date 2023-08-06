@@ -4,12 +4,13 @@ module HaloFit
 include("main.jl")
 
 # Exported functions and values
-export periodic_distance,
-       center_of_mass,
-       shrinking_sphere_cm,
+export Halo,
+       periodic_distance!,
+       center_of_mass!,
+       shrinking_sphere_cm!,
        spherical_overdensity_mass,
        angular_momentum,
-       lambda_bullock,
-       crit_density0
+       λbullock,
+       ρcrit0
 
 end # module HaloFit
