@@ -17,6 +17,7 @@ Pkg.activate("/mnt/zfsusers/rstiskalek/HaloFit")
 
 using DataFrames, HaloFit, HDF5, ProgressMeter
 
+
 begin
     zfill(n::Int, width::Int) = zfill(string(n), width)
     zfill(n::String, width::Int) = lpad(n, width, '0')
@@ -115,7 +116,7 @@ end
 
 
 ################################################################################
-################################################################################
+#                               Submission                                     #
 ################################################################################
 
 
@@ -125,8 +126,7 @@ function fit_csiborg()
         println("Fitting CSiBORG IC `$(nsim)`")
         fpath = path_csiborg_particles(nsim)
         res = fit_from_offsets(fpath, 677.7; verbose=true, load_in_memory=false);
+
+        # TODO: save to HDF5
     end
 end
-
-
-# fit_csiborg()
