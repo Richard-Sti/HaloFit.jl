@@ -12,6 +12,12 @@
 - `ellipsoid_axes_ratio`
 - `ρcrit0`
 
+
+Throughout the code, the following unit convenvention is assumed:
+- Length: $\mathrm{Mpc} / h$
+- Mass: $\mathrm{M}_\odot / h$
+- Velocity: $\mathrm{km} / \mathrm{s}$
+
 ## Installation
 
 To install `HaloFit.jl`, you can clone the repository directly:
