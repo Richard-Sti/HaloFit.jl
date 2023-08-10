@@ -324,7 +324,8 @@ Compute the Bullock spin parameter for a given angular momentum, mass, and radiu
 function λbullock(angmom::Vector{<:T}, mass::T, rad::T) where T <: Real
     # [G] = (Msun / h)^-1 (Mpc / h) (km / s)^2
     G = T(4.300917270069976e-09)
-    return @fastmath sqrt(sum(angmom.^2)) / sqrt(2 * G * mass^3 * rad)
+    λ = sqrt(sum(angmom.^2.0)) / sqrt(2 * G * mass^3.0 * rad)
+    return T(λ)
 end
 
 
