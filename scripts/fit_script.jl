@@ -162,6 +162,7 @@ function fit_tng300dark()
     boxsize = 205.0                     # Mpc/h
 
     fpath = path_tng300dark_particles()
+    println("Fitting TNG300-1-Dark")
     res = fit_from_offsets(fpath, boxsize, "tng300dark"; verbose=true, mpart=mpart,
                            npart_min=250, shrink_factor=0.925)
 
