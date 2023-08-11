@@ -4,3 +4,4 @@ scripts/test.ipynb
 scripts/submit.sh
 scripts/julia-678632.out
 *.out
+scripts/julia.sh
