@@ -25,12 +25,24 @@ begin
 end
 
 
-function make_offsets(halomap)
+function make_offsets(halomap, simname)
     if isa(halomap, HDF5.Dataset)
         halomap = halomap[:, :]
     end
 
-    return Dict(halomap[1, i] => Int64.(halomap[2:end, i]) for i in 2:size(halomap, 2));
+    # In CSiBORG the first `halo` are the unassigned particles, hence the
+    # `start = 2
+    if simname == "csiborg"
+        start = 2
+    elseif simname == "tng300dark"
+        start = 1
+    else
+        error("Unknown simulation name: `$(simname)`")
+    end
+
+
+    offsets = Dict(halomap[1, i] => Int64.(halomap[2:end, i]) for i in start:size(halomap, 2));
+    return halomap[1, :], offsets
 end
 
 
@@ -65,9 +77,9 @@ function fit_from_offsets(fpath, boxsize, simname;
     particles = f["particles"]
 
     if simname == "csiborg"
-        offsets = make_offsets(f["halomap"])
+        hids, offsets = make_offsets(f["halomap"], simname)
     elseif simname == "tng300dark"
-        offsets = make_offsets(f["offsets"])
+        hids, offsets = make_offsets(f["offsets"], simname)
     else
         error("Unknown simulation name: `$(simname)`")
     end
@@ -87,8 +99,10 @@ function fit_from_offsets(fpath, boxsize, simname;
     df = DataFrame([fill(Float32(NaN), n_rows) for _ in 1:n_cols], symbols)
     p = Progress(n_rows; enabled=verbose, dt=0.1, barlen=50, showspeed=true)
     for i in 1:n_rows
-        halo = load_halo_from_offsets(i, particles, offsets, boxsize, simname; mpart=mpart)
-        df[i, :hid] = offsets[i][1]
+        hid = hids[i]
+        df[i, :hid] = hid
+
+        halo = load_halo_from_offsets(hid, particles, offsets, boxsize, simname; mpart=mpart)
 
         if length(halo) < 100
             next!(p)
@@ -151,7 +165,6 @@ function fit_csiborg()
         res = fit_from_offsets(fpath, boxsize, "csiborg"; verbose=true);
 
         fout = path_csiborg_output(nsim)
-        println("Saving to ... `$(fout)`")
         save_frame(fout, res)
     end
 end
@@ -167,6 +180,5 @@ function fit_tng300dark()
                            npart_min=250, shrink_factor=0.925)
 
     fout = path_tng300dark_output()
-    println("Saving to ... `$(fout)`")
     save_frame(fout, res)
 end
