@@ -25,30 +25,32 @@ begin
 end
 
 
-function make_offsets(halomap, simname)
-    if isa(halomap, HDF5.Dataset)
-        halomap = halomap[:, :]
+function make_offsets(halomap::HDF5.Dataset;
+                      start_index::Integer,
+                      zero_index::Bool)
+    x = halomap[:, :]
+    hids = x[1, start_index:end]
+
+    offsets = Dict{Int64, Vector{Int64}}()
+    for n in start_index:size(x, 2)
+        hid = x[1, n]
+        i, j = x[2, n], x[3, n]
+
+        if zero_index
+            i += 1
+            j += 1
+        end
+
+        offsets[hid] = [i, j]
     end
 
-    # In CSiBORG the first `halo` are the unassigned particles, hence the
-    # `start = 2
-    if simname == "csiborg"
-        start = 2
-    elseif simname == "tng300dark"
-        start = 1
-    else
-        error("Unknown simulation name: `$(simname)`")
-    end
-
-
-    offsets = Dict(halomap[1, i] => Int64.(halomap[2:end, i]) for i in start:size(halomap, 2));
-    return halomap[1, :], offsets
+    return hids, offsets
 end
 
 
-function load_halo_from_offsets(hid, particles, offsets, boxsize, simname; mpart=nothing)
+function load_halo_from_offsets(hid::Integer, particles::HDF5.Dataset, offsets::Dict, boxsize::Real, simname::String;
+                                mpart::Union{Nothing, Real}=nothing)
     i, j = offsets[hid]
-    i += 1  # Because Python has different indexing..
     pos = Matrix(particles[1:3, i:j]')
     vel = Matrix(particles[4:6, i:j]')
 
@@ -61,6 +63,7 @@ function load_halo_from_offsets(hid, particles, offsets, boxsize, simname; mpart
     if simname == "csiborg"
         pos .*= @fastmath eltype(pos).(boxsize)
     elseif simname == "tng300dark"
+        # TNG300-1-Dark is in kpc / h
         pos ./= @fastmath 1000
     else
         error("Unknown simulation name: `$(simname)`")
@@ -70,16 +73,19 @@ function load_halo_from_offsets(hid, particles, offsets, boxsize, simname; mpart
 end
 
 
-function fit_from_offsets(fpath, boxsize, simname;
-                          verbose::Bool=true, load_in_memory::Bool=false, mpart=nothing,
-                          npart_min=50, shrink_factor=0.975)
+function fit_from_offsets(fpath::String, boxsize::Real, simname::String;
+                          verbose::Bool=true,
+                          load_in_memory::Bool=false,
+                          mpart::Union{Nothing, Real}=nothing,
+                          npart_min::Int=50,
+                          shrink_factor::Real=0.975)
     f = h5open(fpath, "r")
     particles = f["particles"]
 
     if simname == "csiborg"
-        hids, offsets = make_offsets(f["halomap"], simname)
+        hids, offsets = make_offsets(f["halomap"]; start_index=2, zero_index=true)
     elseif simname == "tng300dark"
-        hids, offsets = make_offsets(f["offsets"], simname)
+        hids, offsets = make_offsets(f["offsets"]; start_index=1, zero_index=true)
     else
         error("Unknown simulation name: `$(simname)`")
     end
@@ -97,7 +103,7 @@ function fit_from_offsets(fpath, boxsize, simname;
     end
 
     df = DataFrame([fill(Float32(NaN), n_rows) for _ in 1:n_cols], symbols)
-    p = Progress(n_rows; enabled=verbose, dt=0.1, barlen=50, showspeed=true)
+    p = Progress(n_rows; enabled=verbose, dt=1, barlen=50, showspeed=true)
     for i in 1:n_rows
         hid = hids[i]
         df[i, :hid] = hid
@@ -140,7 +146,7 @@ function fit_from_offsets(fpath, boxsize, simname;
 end
 
 
-function save_frame(fout, df)
+function save_frame(fout::String, df::HDF5.Dataset)
     println("Writing to ... `$(fout)`")
     h5open(fout, "w") do file
         for col in names(df)
@@ -156,9 +162,8 @@ end
 
 
 function fit_csiborg()
-    nsims = [7444 + n * 24 for n in 0:100]
     boxsize = 677.7  # Mpc/h
-    for nsim in nsims
+    for nsim in [7444 + n * 24 for n in 0:100]
         println("Fitting CSiBORG IC `$(nsim)`")
 
         fpath = path_csiborg_particles(nsim)
@@ -174,10 +179,10 @@ function fit_tng300dark()
     mpart = 0.0047271638660809 * 1e10   # Msun/h
     boxsize = 205.0                     # Mpc/h
 
-    fpath = path_tng300dark_particles()
     println("Fitting TNG300-1-Dark")
+    fpath = path_tng300dark_particles()
     res = fit_from_offsets(fpath, boxsize, "tng300dark"; verbose=true, mpart=mpart,
-                           npart_min=250, shrink_factor=0.925)
+                           npart_min=250, shrink_factor=0.95)
 
     fout = path_tng300dark_output()
     save_frame(fout, res)
