@@ -146,7 +146,7 @@ function fit_from_offsets(fpath::String, boxsize::Real, simname::String;
 end
 
 
-function save_frame(fout::String, df::HDF5.DataFrame)
+function save_frame(fout::String, df::DataFrames.DataFrame)
     println("Writing to ... `$(fout)`")
     h5open(fout, "w") do file
         for col in names(df)
