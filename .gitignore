@@ -1,3 +1,4 @@
 scripts/test.ipynb
 .bashrc
 .vscode/settings.json
+scripts/submit.sh
