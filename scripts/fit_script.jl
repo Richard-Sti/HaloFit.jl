@@ -151,7 +151,7 @@ function fit_csiborg()
         println("Fitting CSiBORG IC `$(nsim)`")
 
         res = fit_from_offsets(path_csiborg_particles(nsim), boxsize, "csiborg";
-                               start_index=2, zero_index=true, npart_min=100
+                               start_index=2, zero_index=true, npart_min=100,
                                verbose=true)
 
         fout = "/mnt/extraspace/rstiskalek/CSiBORG/structfit/halos_$(zfill(nsim, 5)).hdf5"
@@ -167,7 +167,7 @@ function fit_tng300dark()
 
     println("Fitting TNG300-1-Dark")
     res = fit_from_offsets(path_tng300dark_particles(), boxsize, "tng300dark";
-                           start_index=1, zero_index=true, npart_min=100
+                           start_index=1, zero_index=true, npart_min=100,
                            verbose=true, mpart=mpart,
                            shrink_npart_min=250, shrink_factor=0.95)
 
