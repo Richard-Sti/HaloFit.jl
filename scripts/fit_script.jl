@@ -19,9 +19,7 @@ begin
     zfill(n::Int, width::Int) = zfill(string(n), width)
     zfill(n::String, width::Int) = lpad(n, width, '0')
     path_csiborg_particles(nsim::Integer) = "/mnt/extraspace/rstiskalek/CSiBORG/particles/parts_$(zfill(nsim, 5)).h5"
-    path_csiborg_output(nsim::Integer) = "/mnt/extraspace/rstiskalek/CSiBORG/structfit/halos_$(zfill(nsim, 5)).hdf5"
     path_tng300dark_particles() = "/mnt/extraspace/rstiskalek/TNG300-1-Dark/sorted_halos.hdf5"
-    path_tng300dark_output() = "/mnt/extraspace/rstiskalek/TNG300-1-Dark/fitted_halos.hdf5"
 end
 
 
@@ -74,33 +72,22 @@ end
 
 
 function fit_from_offsets(fpath::String, boxsize::Real, simname::String;
+                          start_index::Integer,
+                          zero_index::Bool,
                           verbose::Bool=true,
-                          load_in_memory::Bool=false,
+                          npart_min::Integer=100,
                           mpart::Union{Nothing, Real}=nothing,
-                          npart_min::Int=50,
+                          shrink_npart_min::Int=50,
                           shrink_factor::Real=0.975)
     f = h5open(fpath, "r")
     particles = f["particles"]
 
-    if simname == "csiborg"
-        hids, offsets = make_offsets(f["halomap"]; start_index=2, zero_index=true)
-    elseif simname == "tng300dark"
-        hids, offsets = make_offsets(f["offsets"]; start_index=1, zero_index=true)
-    else
-        error("Unknown simulation name: `$(simname)`")
-    end
+    hids, offsets = make_offsets(f["halomap"]; start_index=2, zero_index=true)
 
     ρ200c = Float32(ρcrit0(1) * 200)
     symbols = [:hid, :cmx, :cmy, :cmz, :mtot, :m200c, :r200c, :lambda200c, :conc, :q, :s]
     n_cols = length(symbols)
     n_rows = length(offsets)
-
-    if load_in_memory
-        println("Loading particles into memory ...")
-        t0 = time()
-        particles = particles[:, :]
-        println("Loaded particles in in $(time() - t0) seconds.")
-    end
 
     df = DataFrame([fill(Float32(NaN), n_rows) for _ in 1:n_cols], symbols)
     p = Progress(n_rows; enabled=verbose, dt=1, barlen=50, showspeed=true)
@@ -110,21 +97,19 @@ function fit_from_offsets(fpath::String, boxsize::Real, simname::String;
 
         halo = load_halo_from_offsets(hid, particles, offsets, boxsize, simname; mpart=mpart)
 
-        if length(halo) < 100
+        if length(halo) < npart_min
             next!(p)
             continue
         end
 
         df[i, :mtot] = sum(halo.mass)
 
-        shrinking_sphere_cm!(halo; npart_min=npart_min, shrink_factor=shrink_factor)
-        df[i, :cmx] = halo.cm[1]
-        df[i, :cmy] = halo.cm[2]
-        df[i, :cmz] = halo.cm[3]
+        shrinking_sphere_cm!(halo; npart_min=shrink_npart_min, shrink_factor=shrink_factor)
+        df[i, :cmx], df[i, :cmy], df[i, :cmz] = halo.cm[1], halo.cm[2], halo.cm[3]
+
 
         m200c, r200c = spherical_overdensity_mass(halo, ρ200c)
-        df[i, :m200c] = m200c
-        df[i, :r200c] = r200c
+        df[i, :m200c], df[i, :r200c] = m200c, r200c
 
         if !isnan(m200c)
             angmom = angular_momentum(halo, r200c)
@@ -133,13 +118,12 @@ function fit_from_offsets(fpath::String, boxsize::Real, simname::String;
             df[i, :conc] = nfw_concentration(halo, r200c)
 
             Iij = inertia_tensor(halo, r200c)
-            q, s = ellipsoid_axes_ratio(Iij)
-            df[i, :q] = q
-            df[i, :s] = s
+            df[i, :q], df[i, :s] = ellipsoid_axes_ratio(Iij)
         end
 
         next!(p)
     end
+
     finish!(p)
 
     return df
@@ -166,11 +150,13 @@ function fit_csiborg()
     for nsim in [7444 + n * 24 for n in 0:100]
         println("Fitting CSiBORG IC `$(nsim)`")
 
-        fpath = path_csiborg_particles(nsim)
-        res = fit_from_offsets(fpath, boxsize, "csiborg"; verbose=true);
+        res = fit_from_offsets(path_csiborg_particles(nsim), boxsize, "csiborg";
+                               start_index=2, zero_index=true, npart_min=100
+                               verbose=true)
 
-        fout = path_csiborg_output(nsim)
+        fout = "/mnt/extraspace/rstiskalek/CSiBORG/structfit/halos_$(zfill(nsim, 5)).hdf5"
         save_frame(fout, res)
+
     end
 end
 
@@ -180,10 +166,11 @@ function fit_tng300dark()
     boxsize = 205.0                     # Mpc/h
 
     println("Fitting TNG300-1-Dark")
-    fpath = path_tng300dark_particles()
-    res = fit_from_offsets(fpath, boxsize, "tng300dark"; verbose=true, mpart=mpart,
-                           npart_min=250, shrink_factor=0.95)
+    res = fit_from_offsets(path_tng300dark_particles(), boxsize, "tng300dark";
+                           start_index=1, zero_index=true, npart_min=100
+                           verbose=true, mpart=mpart,
+                           shrink_npart_min=250, shrink_factor=0.95)
 
-    fout = path_tng300dark_output()
+    fout = "/mnt/extraspace/rstiskalek/TNG300-1-Dark/fitted_halos.hdf5"
     save_frame(fout, res)
 end
