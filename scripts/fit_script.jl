@@ -60,14 +60,16 @@ function load_halo_from_offsets(hid::Integer, particles::HDF5.Dataset, offsets::
 
     if simname == "csiborg"
         pos .*= @fastmath eltype(pos).(boxsize)
+        return Halo(pos, vel, mass, boxsize)
     elseif simname == "tng300dark"
         # TNG300-1-Dark is in kpc / h
         pos ./= @fastmath 1000
+        potential = particles[7, i:j]
+        return Halo(pos, vel, mass, potential, boxsize)
     else
         error("Unknown simulation name: `$(simname)`")
     end
 
-    return Halo(pos, vel, mass, boxsize)
 end
 
 
@@ -85,7 +87,7 @@ function fit_from_offsets(fpath::String, boxsize::Real, simname::String;
     hids, offsets = make_offsets(f["halomap"]; start_index=2, zero_index=true)
 
     ρ200c = Float32(ρcrit0(1) * 200)
-    symbols = [:hid, :cmx, :cmy, :cmz, :mtot, :m200c, :r200c, :lambda200c, :conc, :q, :s]
+    symbols = [:hid, :cmx, :cmy, :cmz, :mtot, :m200c, :r200c, :lambda200c, :conc, :q, :s, :cm_displacement, :virial_fraction]
     n_cols = length(symbols)
     n_rows = length(offsets)
 
@@ -119,6 +121,13 @@ function fit_from_offsets(fpath::String, boxsize::Real, simname::String;
 
             Iij = inertia_tensor(halo, r200c)
             df[i, :q], df[i, :s] = ellipsoid_axes_ratio(Iij)
+
+            df[i, :cm_displacement] = cm_displacement(halo) / r200c
+
+            if simname == "tng300dark"
+                df[i, :virial_fraction] = virial_fraction(halo, r200c)
+            end
+
         end
 
         next!(p)
