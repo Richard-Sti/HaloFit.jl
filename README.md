@@ -11,12 +11,15 @@
 - `inertia_tensor`
 - `ellipsoid_axes_ratio`
 - `ρcrit0`
+- `cm_displacement`
+- `virial_fraction`
 
 
 Throughout the code, the following unit convenvention is assumed:
 - Length: $\mathrm{Mpc} / h$
 - Mass: $\mathrm{M}_\odot / h$
 - Velocity: $\mathrm{km} / \mathrm{s}$
+- Gravitational potential: $(\mathrm{km} / \mathrm{s})^2$
 
 ## Installation
 
