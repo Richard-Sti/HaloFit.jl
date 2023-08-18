@@ -18,6 +18,7 @@ mutable struct Halo{T<:Real}
     pos::Matrix{T}
     vel::Matrix{T}
     mass::Vector{T}
+    potential::Vector{T}
     boxsize::T
     cm::Vector{T}
     dist::Vector{T}
@@ -30,10 +31,24 @@ Base.length(halo::Halo) = size(halo.pos, 1)
 Base.show(io::IO, halo::Halo) = print(io, "Halo($(length(halo)) particles)")
 
 
+function Halo(pos::Matrix{U}, vel::Matrix{U}, mass::Vector{U}, potential::Vector{U}, boxsize::V) where {U <: Real, V <: Real}
+    return Halo(pos,
+                vel,
+                mass,
+                potential,
+                convert(U, boxsize),
+                Vector{U}(undef, 3),
+                Vector{U}(undef, size(pos, 1)),
+                false
+                )
+end
+
+
 function Halo(pos::Matrix{U}, vel::Matrix{U}, mass::Vector{U}, boxsize::V) where {U <: Real, V <: Real}
     return Halo(pos,
                 vel,
                 mass,
+                Vector{U}(undef, size(pos, 1)),
                 convert(U, boxsize),
                 Vector{U}(undef, 3),
                 Vector{U}(undef, size(pos, 1)),
@@ -485,5 +500,72 @@ Calculate the axes ratios of an ellipsoid defined by its inertia tensor `Iij`.
 function ellipsoid_axes_ratio(Iij::Matrix{T}) where T <: Real
     @assert size(Iij) == (3, 3) "Iij must be a 3x3 matrix"
     c, b, a = sqrt_nan.(eigvals(Iij))
-    return b / a, c / a
+    q = b / a
+    s = c / a
+
+    isapprox(q, 0) ? q = T(NaN) : nothing
+    isapprox(s, 0) ? s = T(NaN) : nothing
+
+    return q, s
 end
+
+
+"""
+    cm_displacement(halo)
+
+Compute the displacement between the center of mass of a `halo` from the shrinking sphere
+calculation and the total center of mass.
+
+# Arguments
+- `halo`: Halo object sorted by distance from its center of mass.
+
+# Returns
+-  The displacement between the two "center" of mass positions.
+"""
+function cm_displacement(halo::Halo{T}) where T <: Real
+    @assert halo.is_sorted "Halo must be sorted by distance from its CM"
+
+    cmtot = fill(T(NaN), 3)
+
+    center_of_mass!(cmtot, halo.pos, halo.mass, halo.boxsize)
+
+    return sqrt(sum((cmtot[i] - halo.cm[i])^2 for i in 1:3))
+end
+
+
+"""
+    virial_fraction(halo, rad)
+
+Compute the virial fraction of a `halo` within a given radius `rad`. Note that the halo must
+have the potential of particles.
+
+# Arguments
+- `halo`: Halo object sorted by distance from its center of mass.
+
+# Returns
+- The virial fraction.
+"""
+function virial_fraction(halo::Halo{T}, rad::T) where T <: Real
+    @assert halo.is_sorted "Halo must be sorted by distance from its CM"
+
+    imax = find_first_above_threshold(halo.dist, rad)
+    kinetic_energy = T(0.)
+    potential_energy = T(0.)
+
+
+    @inbounds @fastmath for i in 1:imax
+        particle_kinetic_energy = T(0)
+        @inbounds @fastmath for j in 1:3
+            particle_kinetic_energy += halo.vel[i, j]^2
+        end
+        particle_kinetic_energy *= halo.mass[i] / 2
+
+        kinetic_energy += particle_kinetic_energy
+        potential_energy += halo.mass[i] * abs(halo.potential[i])
+    end
+
+    return 2 * kinetic_energy / potential_energy
+
+end
+
+
