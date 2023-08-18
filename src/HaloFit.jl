@@ -26,6 +26,7 @@ export Halo,
        nfw_concentration,
        inertia_tensor,
        ellipsoid_axes_ratio,
-       ρcrit0
-
+       ρcrit0,
+       cm_displacement,
+       virial_fraction
 end # module HaloFit
