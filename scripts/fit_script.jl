@@ -59,6 +59,23 @@ end
 
 
 """
+    find_csiborg1_initial_snapshot_paths(nsim::Int)
+
+Find the path to the initial snapshot of the CSiBORG-1 simulation with the given `nsim` IC index.
+"""
+function find_csiborg1_initial_snapshot_paths(nsim::Int)
+    folder_path = "/mnt/extraspace/rstiskalek/csiborg1/chain_$nsim"
+    snapshot_path = joinpath(folder_path, "snapshot_00001.hdf5")
+
+    if !isfile(snapshot_path)
+        error("File does not exist: `$(snapshot_path)`")
+    end
+
+    return snapshot_path
+end
+
+
+"""
     find_csiborg2_final_snapshot_paths(nsim::Int, kind::String)
 
 Find the path to the final snapshot and its FoF catalogue of the CSiBORG-2
@@ -88,6 +105,29 @@ function find_csiborg2_final_snapshot_paths(nsim::Int, kind::String)
 
     return snapshot_path, fof_path
 end
+
+
+"""
+    function find_csiborg2_initial_snapshot_paths(nsim::Int, kind::String)
+
+Find the path to the sorted initial snapshot of the CSiBORG-2 simulation with the given `nsim` IC index.
+"""
+function find_csiborg2_initial_snapshot_paths(nsim::Int, kind::String)
+
+    if kind == "varysmall"
+        nsim = zfill(nsim, 3)
+        snapshot_path = "/mnt/extraspace/rstiskalek/csiborg2_$kind/chain_16417_$nsim/output/snapshot_000_sorted.hdf5"
+    else
+        snapshot_path = "/mnt/extraspace/rstiskalek/csiborg2_$kind/chain_$nsim/output/snapshot_000_sorted.hdf5"
+    end
+
+    if !isfile(snapshot_path)
+        error("File does not exist: `$(snapshot_path)`")
+    end
+
+    return snapshot_path
+end
+
 
 
 ################################################################################
