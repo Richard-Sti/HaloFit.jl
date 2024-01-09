@@ -343,7 +343,7 @@ end
 ################################################################################
 
 
-function fit_csiborg1(mode::String)
+function fit_csiborg1()
     # for nsim in [7444 + n * 24 for n in 0:100]
     for nsim in [7468]
         println("Fitting CSiBORG1 IC `$(nsim)`")
