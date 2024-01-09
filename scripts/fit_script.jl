@@ -59,23 +59,6 @@ end
 
 
 """
-    find_csiborg1_initial_snapshot_paths(nsim::Int)
-
-Find the path to the initial snapshot of the CSiBORG-1 simulation with the given `nsim` IC index.
-"""
-function find_csiborg1_initial_snapshot_paths(nsim::Int)
-    folder_path = "/mnt/extraspace/rstiskalek/csiborg1/chain_$nsim"
-    snapshot_path = joinpath(folder_path, "snapshot_00001.hdf5")
-
-    if !isfile(snapshot_path)
-        error("File does not exist: `$(snapshot_path)`")
-    end
-
-    return snapshot_path
-end
-
-
-"""
     find_csiborg2_final_snapshot_paths(nsim::Int, kind::String)
 
 Find the path to the final snapshot and its FoF catalogue of the CSiBORG-2
@@ -105,29 +88,6 @@ function find_csiborg2_final_snapshot_paths(nsim::Int, kind::String)
 
     return snapshot_path, fof_path
 end
-
-
-"""
-    function find_csiborg2_initial_snapshot_paths(nsim::Int, kind::String)
-
-Find the path to the sorted initial snapshot of the CSiBORG-2 simulation with the given `nsim` IC index.
-"""
-function find_csiborg2_initial_snapshot_paths(nsim::Int, kind::String)
-
-    if kind == "varysmall"
-        nsim = zfill(nsim, 3)
-        snapshot_path = "/mnt/extraspace/rstiskalek/csiborg2_$kind/chain_16417_$nsim/output/snapshot_000_sorted.hdf5"
-    else
-        snapshot_path = "/mnt/extraspace/rstiskalek/csiborg2_$kind/chain_$nsim/output/snapshot_000_sorted.hdf5"
-    end
-
-    if !isfile(snapshot_path)
-        error("File does not exist: `$(snapshot_path)`")
-    end
-
-    return snapshot_path
-end
-
 
 
 ################################################################################
@@ -210,7 +170,6 @@ function make_offsets_csiborg2(nsim::Int, kind::String)
     end
 
     return hid2offsets
-
 end
 
 
@@ -287,10 +246,10 @@ function fit_csiborg_final(simname::String, nsim::Int;
                            verbose::Bool=true, npart_min::Integer=100, shrink_npart_min::Int=50,
                            shrink_factor::Real=0.975)
     if simname == "csiborg1"
-        snapshot_path, fof_path = find_csiborg1_final_snapshot_paths(nsim)
+        snapshot_path, __ = find_csiborg1_final_snapshot_paths(nsim)
     elseif occursin("csiborg2", simname)
         kind = string(split(simname, "_")[end])
-        snapshot_path, fof_path = find_csiborg2_final_snapshot_paths(nsim, kind)
+        snapshot_path, __ = find_csiborg2_final_snapshot_paths(nsim, kind)
     else
         error("Unknown simulation name: `$(simname)`")
     end
@@ -384,9 +343,9 @@ end
 ################################################################################
 
 
-function fit_csiborg1()
+function fit_csiborg1(mode::String)
     # for nsim in [7444 + n * 24 for n in 0:100]
-    for nsim in [7444]
+    for nsim in [7468]
         println("Fitting CSiBORG1 IC `$(nsim)`")
         res = fit_csiborg_final("csiborg1", nsim)
         fout = "/mnt/extraspace/rstiskalek/csiborg1/chain_$nsim/fitted_halos.hdf5"
