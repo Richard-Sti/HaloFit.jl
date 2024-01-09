@@ -15,10 +15,10 @@ end
 
 args = parse_commandline()
 
-if args["kind"] == "csiborg"
-    fit_csiborg()
-elseif args["kind"] == "tng300dark"
-    fit_tng300dark()
+if args["kind"] == "csiborg1"
+    fit_csiborg1()
+elseif occursin("csiborg2", args["kind"])
+    fit_csiborg2(args["kind"])
 else
     error("Unknown simulation kind: `$(args["kind"])`")
 end
